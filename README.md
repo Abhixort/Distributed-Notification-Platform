@@ -25,13 +25,13 @@ An enterprise-grade, high-throughput asynchronous distributed notification engin
 
 ```mermaid
 graph TD
-    Client["Client / Microservices / Dashboard"] -->|REST API / Async Ingest| API["FastAPI Application (ASGI)"]
-    API -->|1. Token-Bucket Rate Limit Check| RedisLimiter[("Redis (Atomic Lua Token Bucket)")]
-    API -->|2. Idempotency Lock & Lookup| RedisIdem[("Redis Idempotency Cache")]
-    API -->|3. Record Ingestion (PENDING/QUEUED)| DB[("PostgreSQL 16")]
-    API -->|4. Push Task to Priority Queues| Broker[("Redis Message Broker")]
+    Client["Client / Microservices / Dashboard"] -->|"REST API / Async Ingest"| API["FastAPI Application (ASGI)"]
+    API -->|"1. Token-Bucket Rate Limit Check"| RedisLimiter[("Redis (Atomic Lua Token Bucket)")]
+    API -->|"2. Idempotency Lock & Lookup"| RedisIdem[("Redis Idempotency Cache")]
+    API -->|"3. Record Ingestion (PENDING/QUEUED)"| DB[("PostgreSQL 16")]
+    API -->|"4. Push Task to Priority Queues"| Broker[("Redis Message Broker")]
     
-    subgraph Celery Queue Architecture
+    subgraph CeleryQueue ["Celery Queue Architecture"]
         Broker --> QHigh["high_priority queue (Expedited)"]
         Broker --> QDefault["default_priority queue (Standard)"]
         Broker --> QLow["low_priority queue (Bulk)"]
@@ -43,16 +43,19 @@ graph TD
     QLow --> WLow["Worker Fleet (Low Priority)"]
     QDLQ --> WDLQ["DLQ Inspector / Redrive Worker"]
 
-    WHigh & WDefault & WLow --> ProviderFactory["Provider Adapter Layer"]
-    ProviderFactory -->|Email| SES["AWS SES / SMTP Gateway"]
-    ProviderFactory -->|SMS| SNS["AWS SNS / Twilio Gateway"]
-    ProviderFactory -->|Webhook| WebhookTarget["Target Webhook (HMAC-SHA256 Signed)"]
+    WHigh --> ProviderFactory["Provider Adapter Layer"]
+    WDefault --> ProviderFactory
+    QLow --> ProviderFactory
 
-    ProviderFactory -->|Failures Exceeding Max Retries| QDLQ
-    ProviderFactory -->|Audit Logs & Status Updates| DB
+    ProviderFactory -->|"Email"| SES["AWS SES / SMTP Gateway"]
+    ProviderFactory -->|"SMS"| SNS["AWS SNS / Twilio Gateway"]
+    ProviderFactory -->|"Webhook"| WebhookTarget["Target Webhook (HMAC-SHA256 Signed)"]
+
+    ProviderFactory -->|"Failures Exceeding Max Retries"| QDLQ
+    ProviderFactory -->|"Audit Logs & Status Updates"| DB
     
-    Scheduler["Celery Beat"] -->|Scheduled Notifications & Cron| Broker
-    Flower["Flower Dashboard (Port 5555)"] -->|Queue Monitoring| Broker
+    Scheduler["Celery Beat"] -->|"Scheduled Notifications & Cron"| Broker
+    Flower["Flower Dashboard (Port 5555)"] -->|"Queue Monitoring"| Broker
 ```
 
 ---

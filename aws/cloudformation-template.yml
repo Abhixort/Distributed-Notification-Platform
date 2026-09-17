@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation Infrastructure for Distributed Notification Platform (ECS Fargate + RDS PostgreSQL + ElastiCache Redis + IAM SES/SNS Policies)'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    Description: Environment name prefix for AWS resources
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Target VPC for ECS tasks, RDS, and ElastiCache
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of subnets for ECS service deployment
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # IAM Task Execution & Task Roles with SES / SNS Permissions
+  # ---------------------------------------------------------------------------
+  NotificationTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-notification-task-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: NotificationDeliveryPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                  - ses:GetSendQuota
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                  - sns:SetSMSAttributes
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - sqs:*
+                Resource: '*'
+
+  # ---------------------------------------------------------------------------
+  # ECS Cluster
+  # ---------------------------------------------------------------------------
+  NotificationECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-notification-cluster'
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+
+  # ---------------------------------------------------------------------------
+  # CloudWatch Log Group
+  # ---------------------------------------------------------------------------
+  NotificationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}-notification-platform'
+      RetentionInDays: 30
+
+Outputs:
+  ClusterName:
+    Description: Name of the ECS Cluster
+    Value: !Ref NotificationECSCluster
+  TaskRoleArn:
+    Description: ARN of the Notification Task Role
+    Value: !GetAtt NotificationTaskRole.Arn

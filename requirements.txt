@@ -1,0 +1,42 @@
+# Core Framework & Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.8.0
+pydantic-settings>=2.4.0
+
+# Database & Migrations
+sqlalchemy>=2.0.32
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+alembic>=1.13.2
+aiosqlite>=0.20.0
+
+# Message Broker & Task Queue
+celery[redis]>=5.4.0
+redis>=5.0.8
+flower>=2.0.1
+
+# HTTP Client & Security & Templating
+httpx>=0.27.0
+jinja2>=3.1.4
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# AWS SDK
+boto3>=1.35.0
+
+# Observability & Metrics
+prometheus-fastapi-instrumentator>=7.0.0
+prometheus-client>=0.20.0
+structlog>=24.4.0
+
+# Utilities
+tenacity>=9.0.0
+python-multipart>=0.0.9
+email-validator>=2.2.0
+
+# Testing & Load Testing
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=5.0.0
+locust>=2.31.0

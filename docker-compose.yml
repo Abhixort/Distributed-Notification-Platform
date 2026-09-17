@@ -1,0 +1,163 @@
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Database Layer (PostgreSQL)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: notif_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: notification_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d notification_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Message Broker & Cache (Redis)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: notif_redis
+    restart: always
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # FastAPI Application Server (ASGI)
+  # ---------------------------------------------------------------------------
+  api:
+    build: .
+    container_name: notif_api
+    restart: always
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@postgres:5432/notification_db
+      - DATABASE_SYNC_URL=postgresql+psycopg2://postgres:postgrespassword@postgres:5432/notification_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USE_MOCK_PROVIDERS=true
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+
+  # ---------------------------------------------------------------------------
+  # Celery Worker: High Priority Queue (Expedited deliveries & DLQ redrives)
+  # ---------------------------------------------------------------------------
+  celery_worker_high:
+    build: .
+    container_name: notif_worker_high
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@postgres:5432/notification_db
+      - DATABASE_SYNC_URL=postgresql+psycopg2://postgres:postgrespassword@postgres:5432/notification_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USE_MOCK_PROVIDERS=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "-Q", "high_priority", "--concurrency=8", "-n", "worker_high@%h", "-l", "INFO"]
+
+  # ---------------------------------------------------------------------------
+  # Celery Worker: Default & Low Priority & Channel Queues
+  # ---------------------------------------------------------------------------
+  celery_worker_default:
+    build: .
+    container_name: notif_worker_default
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@postgres:5432/notification_db
+      - DATABASE_SYNC_URL=postgresql+psycopg2://postgres:postgrespassword@postgres:5432/notification_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USE_MOCK_PROVIDERS=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.core.celery_app.celery_app", "worker", "-Q", "default_priority,low_priority,email_queue,sms_queue,webhook_queue", "--concurrency=8", "-n", "worker_default@%h", "-l", "INFO"]
+
+  # ---------------------------------------------------------------------------
+  # Celery Beat Scheduler (Periodic Tasks & Scheduled Notifications)
+  # ---------------------------------------------------------------------------
+  celery_beat:
+    build: .
+    container_name: notif_celery_beat
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@postgres:5432/notification_db
+      - DATABASE_SYNC_URL=postgresql+psycopg2://postgres:postgrespassword@postgres:5432/notification_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USE_MOCK_PROVIDERS=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.core.celery_app.celery_app", "beat", "-l", "INFO"]
+
+  # ---------------------------------------------------------------------------
+  # Flower: Real-Time Celery Monitoring Dashboard
+  # ---------------------------------------------------------------------------
+  flower:
+    build: .
+    container_name: notif_flower
+    restart: always
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.core.celery_app.celery_app", "flower", "--port=5555"]
+
+  # ---------------------------------------------------------------------------
+  # Prometheus: Metrics Aggregation
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    container_name: notif_prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
